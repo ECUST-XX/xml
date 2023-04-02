@@ -7,7 +7,8 @@ package xml_test
 import (
 	"fmt"
 	"os"
-	xml "xml_shortform"
+
+	"github.com/ECUST-XX/xml"
 )
 
 func ExampleMarshalIndent() {

@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	xml "xml_shortform"
+
+	"github.com/ECUST-XX/xml"
 )
 
 type Animal int
