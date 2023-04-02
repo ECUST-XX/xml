@@ -5,9 +5,9 @@
 package xml_test
 
 import (
-	"encoding/xml"
 	"fmt"
 	"os"
+	xml "xml_shortform"
 )
 
 func ExampleMarshalIndent() {

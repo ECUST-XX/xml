@@ -5,10 +5,10 @@
 package xml_test
 
 import (
-	"encoding/xml"
 	"fmt"
 	"log"
 	"strings"
+	xml "xml_shortform"
 )
 
 type Animal int
