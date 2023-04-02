@@ -140,6 +140,26 @@ func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// MarshalIndentShortForm works like MarshalIndent, but each empty XML element
+// will self-closing.
+// eg.
+// <Plain><emptyElement></emptyElement></Plain>
+// will marshal in short form
+// <Plain><emptyElement /></Plain>
+func MarshalIndentShortForm(v any, prefix, indent string) ([]byte, error) {
+	var b bytes.Buffer
+	enc := NewEncoder(&b)
+	enc.Indent(prefix, indent)
+	enc.ShortForm()
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
 // An Encoder writes XML data to an output stream.
 type Encoder struct {
 	p printer
@@ -150,6 +170,10 @@ func NewEncoder(w io.Writer) *Encoder {
 	e := &Encoder{printer{w: bufio.NewWriter(w)}}
 	e.p.encoder = e
 	return e
+}
+
+func (enc *Encoder) ShortForm() {
+	enc.p.shortForm = true
 }
 
 // Indent sets the encoder to generate XML in which each element
@@ -212,7 +236,7 @@ func (enc *Encoder) EncodeToken(t Token) error {
 	p := &enc.p
 	switch t := t.(type) {
 	case StartElement:
-		if err := p.writeStart(&t); err != nil {
+		if err := p.writeStart(&t, false); err != nil {
 			return err
 		}
 	case EndElement:
@@ -319,6 +343,7 @@ type printer struct {
 	w          *bufio.Writer
 	encoder    *Encoder
 	seq        int
+	shortForm  bool
 	indent     string
 	prefix     string
 	depth      int
@@ -543,7 +568,41 @@ func (p *printer) marshalValue(val reflect.Value, finfo *fieldInfo, startTemplat
 		}
 	}
 
-	if err := p.writeStart(&start); err != nil {
+	selfClosing := false
+	if p.shortForm {
+		if val.Kind() == reflect.Struct {
+			have := false
+			for _, v := range tinfo.fields {
+				fv := val.Field(v.idx[0])
+				fk := fv.Kind()
+				if len(v.parents) > 0 && fk != reflect.Pointer && fk != reflect.Interface {
+					have = true
+					break
+				}
+
+				if v.flags&fAttr != 0 {
+					continue
+				}
+				if v.flags&(fCDATA|fCharData|fInnerXML|fComment|fAny) != 0 && checkEmptyContent(fv) {
+					continue
+				}
+				if v.flags&fOmitEmpty != 0 && isEmptyValue(fv) {
+					continue
+				}
+				if (fk == reflect.Pointer || fk == reflect.Interface) && fv.IsNil() {
+					continue
+				}
+
+				have = true
+				break
+			}
+			selfClosing = !have
+		} else {
+			selfClosing = checkEmptyContent(val)
+		}
+	}
+
+	if err := p.writeStart(&start, selfClosing); err != nil {
 		return err
 	}
 
@@ -563,11 +622,36 @@ func (p *printer) marshalValue(val reflect.Value, finfo *fieldInfo, startTemplat
 		return err
 	}
 
+	if selfClosing && p.shortForm {
+		return p.cachedWriteError()
+	}
+
 	if err := p.writeEnd(start.Name); err != nil {
 		return err
 	}
 
 	return p.cachedWriteError()
+}
+
+// check element's content is empty
+// true: <element></element>
+// false: <element>0</element>
+func checkEmptyContent(val reflect.Value) bool {
+	switch val.Kind() {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128,
+		reflect.Chan, reflect.Func, reflect.Map, reflect.UnsafePointer, reflect.Struct:
+		return false
+	case reflect.String,
+		reflect.Array,
+		reflect.Slice:
+		return val.Len() == 0
+	case reflect.Interface, reflect.Pointer:
+		return val.IsNil()
+	}
+	return false
 }
 
 // marshalAttr marshals an attribute with the given name and value, adding to start.Attr.
@@ -698,7 +782,7 @@ func (p *printer) marshalInterface(val Marshaler, start StartElement) error {
 
 // marshalTextInterface marshals a TextMarshaler interface value.
 func (p *printer) marshalTextInterface(val encoding.TextMarshaler, start StartElement) error {
-	if err := p.writeStart(&start); err != nil {
+	if err := p.writeStart(&start, false); err != nil {
 		return err
 	}
 	text, err := val.MarshalText()
@@ -710,7 +794,7 @@ func (p *printer) marshalTextInterface(val encoding.TextMarshaler, start StartEl
 }
 
 // writeStart writes the given start element.
-func (p *printer) writeStart(start *StartElement) error {
+func (p *printer) writeStart(start *StartElement, selfClosing bool) error {
 	if start.Name.Local == "" {
 		return fmt.Errorf("xml: start tag with no name")
 	}
@@ -743,6 +827,14 @@ func (p *printer) writeStart(start *StartElement) error {
 		p.WriteString(`="`)
 		p.EscapeString(attr.Value)
 		p.WriteByte('"')
+	}
+
+	if selfClosing && p.shortForm {
+		p.WriteString(" />")
+		p.writeIndent(-1)
+		p.popPrefix()
+		p.tags = p.tags[:len(p.tags)-1]
+		return nil
 	}
 	p.WriteByte('>')
 	return nil
@@ -964,7 +1056,23 @@ func (p *printer) marshalStruct(tinfo *typeInfo, val reflect.Value) error {
 			}
 			if len(finfo.parents) > len(s.stack) {
 				if vf.Kind() != reflect.Pointer && vf.Kind() != reflect.Interface || !vf.IsNil() {
-					if err := s.push(finfo.parents[len(s.stack):]); err != nil {
+					selfClose := false
+					if p.shortForm {
+						if finfo.flags&fOmitEmpty != 0 && (vf.Kind() == reflect.Array || vf.Kind() == reflect.Slice) {
+							have := false
+							for i := 0; i < vf.Len(); i++ {
+								if !checkEmptyContent(vf.Index(i)) {
+									have = true
+									break
+								}
+							}
+							selfClose = !have
+						} else {
+							selfClose = checkEmptyContent(vf)
+						}
+					}
+
+					if err := s.push(finfo.parents[len(s.stack):], selfClose); err != nil {
 						return err
 					}
 				}
@@ -1090,10 +1198,18 @@ func (s *parentStack) trim(parents []string) error {
 }
 
 // push adds parent elements to the stack and writes open tags.
-func (s *parentStack) push(parents []string) error {
-	for i := 0; i < len(parents); i++ {
-		if err := s.p.writeStart(&StartElement{Name: Name{Local: parents[i]}}); err != nil {
+func (s *parentStack) push(parents []string, selfClosing bool) error {
+	for i := 0; i < len(parents)-1; i++ {
+		if err := s.p.writeStart(&StartElement{Name: Name{Local: parents[i]}}, false); err != nil {
 			return err
+		}
+	}
+	if len(parents) > 0 {
+		if err := s.p.writeStart(&StartElement{Name: Name{Local: parents[len(parents)-1]}}, selfClosing); err != nil {
+			return err
+		}
+		if selfClosing && len(parents) > 0 {
+			parents = parents[:len(parents)-1]
 		}
 	}
 	s.stack = append(s.stack, parents...)

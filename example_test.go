@@ -149,3 +149,49 @@ func ExampleUnmarshal() {
 	// Groups: [Friends Squash]
 	// Address: {Hanga Roa Easter Island}
 }
+
+func ExampleMarshalShortForm() {
+	type Address struct {
+		City, State string
+	}
+	type Person struct {
+		XMLName   xml.Name `xml:"person"`
+		Id        int      `xml:"id,attr"`
+		FirstName string   `xml:"name>first"`
+		LastName  string   `xml:"name>last"`
+		Age       int      `xml:"age"`
+		Height    float32  `xml:"height,omitempty"`
+		Married   bool
+		Address
+		Comment       string   `xml:",comment"`
+		FavoriteMusic []string `xml:"favorite_music"`
+		LuckyNumber   int      `xml:"lucky_number"`
+	}
+
+	v := &Person{Id: 13, FirstName: "John", LastName: ""}
+	v.Comment = " Need more details. "
+	v.Address = Address{"Hanga Roa", ""}
+	v.FavoriteMusic = []string{"Made in Heaven", ""}
+
+	output, err := xml.MarshalIndentShortForm(v, "  ", "    ")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+	}
+
+	os.Stdout.Write(output)
+	// Output:
+	//   <person id="13">
+	//       <name>
+	//           <first>John</first>
+	//           <last />
+	//       </name>
+	//       <age>0</age>
+	//       <Married>false</Married>
+	//       <City>Hanga Roa</City>
+	//       <State />
+	//       <!-- Need more details. -->
+	//       <favorite_music>Made in Heaven</favorite_music>
+	//       <favorite_music />
+	//       <lucky_number>0</lucky_number>
+	//   </person>
+}

@@ -2589,3 +2589,869 @@ func TestClose(t *testing.T) {
 		})
 	}
 }
+
+var shortFormTests = []struct {
+	Value     any
+	ExpectXML string
+}{
+	// Test nil marshals to nothing
+	{Value: nil, ExpectXML: ``},
+	{Value: nilStruct, ExpectXML: ``},
+
+	// Test value types
+	{Value: &Plain{true}, ExpectXML: `<Plain><V>true</V></Plain>`},
+	{Value: &Plain{false}, ExpectXML: `<Plain><V>false</V></Plain>`},
+	{Value: &Plain{int(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{int8(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{int16(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{int32(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{uint(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{uint8(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{uint16(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{uint32(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+	{Value: &Plain{float32(1.25)}, ExpectXML: `<Plain><V>1.25</V></Plain>`},
+	{Value: &Plain{float64(1.25)}, ExpectXML: `<Plain><V>1.25</V></Plain>`},
+	{Value: &Plain{uintptr(0xFFDD)}, ExpectXML: `<Plain><V>65501</V></Plain>`},
+	{Value: &Plain{"gopher"}, ExpectXML: `<Plain><V>gopher</V></Plain>`},
+	{Value: &Plain{[]byte("gopher")}, ExpectXML: `<Plain><V>gopher</V></Plain>`},
+	{Value: &Plain{"</>"}, ExpectXML: `<Plain><V>&lt;/&gt;</V></Plain>`},
+	{Value: &Plain{[]byte("</>")}, ExpectXML: `<Plain><V>&lt;/&gt;</V></Plain>`},
+	{Value: &Plain{[3]byte{'<', '/', '>'}}, ExpectXML: `<Plain><V>&lt;/&gt;</V></Plain>`},
+	{Value: &Plain{NamedType("potato")}, ExpectXML: `<Plain><V>potato</V></Plain>`},
+	{Value: &Plain{[]int{1, 2, 3}}, ExpectXML: `<Plain><V>1</V><V>2</V><V>3</V></Plain>`},
+	{Value: &Plain{[3]int{1, 2, 3}}, ExpectXML: `<Plain><V>1</V><V>2</V><V>3</V></Plain>`},
+	{Value: ifaceptr(true), ExpectXML: `<bool>true</bool>`},
+
+	// Test time.
+	{
+		Value:     &Plain{time.Unix(1e9, 123456789).UTC()},
+		ExpectXML: `<Plain><V>2001-09-09T01:46:40.123456789Z</V></Plain>`,
+	},
+
+	// A pointer to struct{} may be used to test for an element's presence.
+	{
+		Value:     &PresenceTest{new(struct{})},
+		ExpectXML: `<PresenceTest><Exists /></PresenceTest>`,
+	},
+	{
+		Value:     &PresenceTest{},
+		ExpectXML: `<PresenceTest />`,
+	},
+
+	// Check that []byte works, including named []byte types.
+	{
+		Value:     &Data{Bytes: []byte("ab"), Custom: MyBytes("cd"), Attr: []byte{'v'}},
+		ExpectXML: `<Data Attr="v"><Bytes>ab</Bytes><Custom>cd</Custom></Data>`,
+	},
+
+	// Test innerxml
+	{
+		Value: &SecretAgent{
+			Handle:    "007",
+			Identity:  "James Bond",
+			Obfuscate: "<redacted/>",
+		},
+		ExpectXML: `<agent handle="007"><Identity>James Bond</Identity><redacted/></agent>`,
+	},
+
+	// Test structs
+	{Value: &Port{Type: "ssl", Number: "443"}, ExpectXML: `<port type="ssl">443</port>`},
+	{Value: &Port{Number: "443"}, ExpectXML: `<port>443</port>`},
+	{Value: &Port{Type: "<unix>"}, ExpectXML: `<port type="&lt;unix&gt;" />`},
+	{Value: &Port{Number: "443", Comment: "https"}, ExpectXML: `<port><!--https-->443</port>`},
+	{Value: &Port{Number: "443", Comment: "add space-"}, ExpectXML: `<port><!--add space- -->443</port>`},
+	{Value: &Domain{Name: []byte("google.com&friends")}, ExpectXML: `<domain>google.com&amp;friends</domain>`},
+	{Value: &Domain{Name: []byte("google.com"), Comment: []byte(" &friends ")}, ExpectXML: `<domain>google.com<!-- &friends --></domain>`},
+	{Value: &Book{Title: "Pride & Prejudice"}, ExpectXML: `<book>Pride &amp; Prejudice</book>`},
+	{Value: &Event{Year: -3114}, ExpectXML: `<event>-3114</event>`},
+	{Value: &Movie{Length: 13440}, ExpectXML: `<movie>13440</movie>`},
+	{Value: &Pi{Approximation: 3.14159265}, ExpectXML: `<pi>3.1415927</pi>`},
+	{Value: &Universe{Visible: 9.3e13}, ExpectXML: `<universe>9.3e+13</universe>`},
+	{Value: &Particle{HasMass: true}, ExpectXML: `<particle>true</particle>`},
+	{Value: &Departure{When: ParseTime("2013-01-09T00:15:00-09:00")}, ExpectXML: `<departure>2013-01-09T00:15:00-09:00</departure>`},
+	{Value: atomValue, ExpectXML: `<feed xmlns="http://www.w3.org/2005/Atom" updated="2003-12-13T18:30:02Z"><title>Example Feed</title><id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id><link href="http://example.org/" /><author><name>John Doe</name><uri /><email /></author><entry><title>Atom-Powered Robots Run Amok</title><id>urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a</id><link href="http://example.org/2003/12/13/atom03" /><updated>2003-12-13T18:30:02Z</updated><author><name /><uri /><email /></author><summary>Some text.</summary></entry></feed>`},
+	{Value: &Generic[int]{1}, ExpectXML: `<Generic><X>1</X></Generic>`},
+	{
+		Value: &Ship{
+			Name:  "Heart of Gold",
+			Pilot: "Computer",
+			Age:   1,
+			Drive: ImprobabilityDrive,
+			Passenger: []*Passenger{
+				{
+					Name:   []string{"Zaphod", "Beeblebrox"},
+					Weight: 7.25,
+				},
+				{
+					Name:   []string{"Trisha", "McMillen"},
+					Weight: 5.5,
+				},
+				{
+					Name:   []string{"Ford", "Prefect"},
+					Weight: 7,
+				},
+				{
+					Name:   []string{"Arthur", "Dent"},
+					Weight: 6.75,
+				},
+			},
+		},
+		ExpectXML: `<spaceship name="Heart of Gold" pilot="Computer">` +
+			`<drive>` + strconv.Itoa(int(ImprobabilityDrive)) + `</drive>` +
+			`<age>1</age>` +
+			`<passenger>` +
+			`<name>Zaphod</name>` +
+			`<name>Beeblebrox</name>` +
+			`<weight>7.25</weight>` +
+			`</passenger>` +
+			`<passenger>` +
+			`<name>Trisha</name>` +
+			`<name>McMillen</name>` +
+			`<weight>5.5</weight>` +
+			`</passenger>` +
+			`<passenger>` +
+			`<name>Ford</name>` +
+			`<name>Prefect</name>` +
+			`<weight>7</weight>` +
+			`</passenger>` +
+			`<passenger>` +
+			`<name>Arthur</name>` +
+			`<name>Dent</name>` +
+			`<weight>6.75</weight>` +
+			`</passenger>` +
+			`</spaceship>`,
+	},
+
+	// Test a>b
+	{
+		Value: &NestedItems{Items: nil, Item1: nil},
+		ExpectXML: `<result>` +
+			`<Items />` +
+			`<Items />` +
+			`</result>`,
+	},
+	{
+		Value: &NestedItems{Items: []string{}, Item1: []string{}},
+		ExpectXML: `<result>` +
+			`<Items />` +
+			`<Items />` +
+			`</result>`,
+	},
+	{
+		Value: &NestedItems{Items: nil, Item1: []string{"A"}},
+		ExpectXML: `<result>` +
+			`<Items />` +
+			`<Items>` +
+			`<item1>A</item1>` +
+			`</Items>` +
+			`</result>`,
+	},
+	{
+		Value: &NestedItems{Items: []string{"A", "B"}, Item1: nil},
+		ExpectXML: `<result>` +
+			`<Items>` +
+			`<item>A</item>` +
+			`<item>B</item>` +
+			`</Items>` +
+			`</result>`,
+	},
+	{
+		Value: &NestedItems{Items: []string{"A", "B"}, Item1: []string{"C"}},
+		ExpectXML: `<result>` +
+			`<Items>` +
+			`<item>A</item>` +
+			`<item>B</item>` +
+			`<item1>C</item1>` +
+			`</Items>` +
+			`</result>`,
+	},
+	{
+		Value: &NestedOrder{Field1: "C", Field2: "B", Field3: "A"},
+		ExpectXML: `<result>` +
+			`<parent>` +
+			`<c>C</c>` +
+			`<b>B</b>` +
+			`<a>A</a>` +
+			`</parent>` +
+			`</result>`,
+	},
+	{
+		Value: &NilTest{A: "A", B: nil, C: "C"},
+		ExpectXML: `<NilTest>` +
+			`<parent1>` +
+			`<parent2><a>A</a></parent2>` +
+			`<parent2><c>C</c></parent2>` +
+			`</parent1>` +
+			`</NilTest>`,
+	},
+	{
+		Value: &MixedNested{A: "A", B: "B", C: "C", D: "D"},
+		ExpectXML: `<result>` +
+			`<parent1><a>A</a></parent1>` +
+			`<b>B</b>` +
+			`<parent1>` +
+			`<parent2><c>C</c></parent2>` +
+			`<d>D</d>` +
+			`</parent1>` +
+			`</result>`,
+	},
+	{
+		Value:     &Service{Port: &Port{Number: "80"}},
+		ExpectXML: `<service><host><port>80</port></host></service>`,
+	},
+	{
+		Value:     &Service{},
+		ExpectXML: `<service />`,
+	},
+	{
+		Value: &Service{Port: &Port{Number: "80"}, Extra1: "A", Extra2: "B"},
+		ExpectXML: `<service>` +
+			`<host><port>80</port></host>` +
+			`<Extra1>A</Extra1>` +
+			`<host><extra2>B</extra2></host>` +
+			`</service>`,
+	},
+	{
+		Value: &Service{Port: &Port{Number: "80"}, Extra2: "example"},
+		ExpectXML: `<service>` +
+			`<host><port>80</port></host>` +
+			`<host><extra2>example</extra2></host>` +
+			`</service>`,
+	},
+	{
+		Value: &struct {
+			XMLName struct{} `xml:"space top"`
+			A       string   `xml:"x>a"`
+			B       string   `xml:"x>b"`
+			C       string   `xml:"space x>c"`
+			C1      string   `xml:"space1 x>c"`
+			D1      string   `xml:"space1 x>d"`
+		}{
+			A:  "a",
+			B:  "b",
+			C:  "c",
+			C1: "c1",
+			D1: "d1",
+		},
+		ExpectXML: `<top xmlns="space">` +
+			`<x><a>a</a><b>b</b><c xmlns="space">c</c>` +
+			`<c xmlns="space1">c1</c>` +
+			`<d xmlns="space1">d1</d>` +
+			`</x>` +
+			`</top>`,
+	},
+	{
+		Value: &struct {
+			XMLName Name
+			A       string `xml:"x>a"`
+			B       string `xml:"x>b"`
+			C       string `xml:"space x>c"`
+			C1      string `xml:"space1 x>c"`
+			D1      string `xml:"space1 x>d"`
+		}{
+			XMLName: Name{
+				Space: "space0",
+				Local: "top",
+			},
+			A:  "a",
+			B:  "b",
+			C:  "c",
+			C1: "c1",
+			D1: "d1",
+		},
+		ExpectXML: `<top xmlns="space0">` +
+			`<x><a>a</a><b>b</b>` +
+			`<c xmlns="space">c</c>` +
+			`<c xmlns="space1">c1</c>` +
+			`<d xmlns="space1">d1</d>` +
+			`</x>` +
+			`</top>`,
+	},
+	{
+		Value: &struct {
+			XMLName struct{} `xml:"top"`
+			B       string   `xml:"space x>b"`
+			B1      string   `xml:"space1 x>b"`
+		}{
+			B:  "b",
+			B1: "b1",
+		},
+		ExpectXML: `<top>` +
+			`<x><b xmlns="space">b</b>` +
+			`<b xmlns="space1">b1</b></x>` +
+			`</top>`,
+	},
+
+	// Test struct embedding
+	{
+		Value: &EmbedA{
+			EmbedC: EmbedC{
+				FieldA1: "", // Shadowed by A.A
+				FieldA2: "", // Shadowed by A.A
+				FieldB:  "A.C.B",
+				FieldC:  "A.C.C",
+			},
+			EmbedB: EmbedB{
+				FieldB: "A.B.B",
+				EmbedC: &EmbedC{
+					FieldA1: "A.B.C.A1",
+					FieldA2: "A.B.C.A2",
+					FieldB:  "", // Shadowed by A.B.B
+					FieldC:  "A.B.C.C",
+				},
+			},
+			FieldA: "A.A",
+			embedD: embedD{
+				FieldE: "A.D.E",
+			},
+		},
+		ExpectXML: `<EmbedA>` +
+			`<FieldB>A.C.B</FieldB>` +
+			`<FieldC>A.C.C</FieldC>` +
+			`<EmbedB>` +
+			`<FieldB>A.B.B</FieldB>` +
+			`<FieldA>` +
+			`<A1>A.B.C.A1</A1>` +
+			`<A2>A.B.C.A2</A2>` +
+			`</FieldA>` +
+			`<FieldC>A.B.C.C</FieldC>` +
+			`</EmbedB>` +
+			`<FieldA>A.A</FieldA>` +
+			`<FieldE>A.D.E</FieldE>` +
+			`</EmbedA>`,
+	},
+
+	// Anonymous struct pointer field which is nil
+	{
+		Value:     &EmbedB{},
+		ExpectXML: `<EmbedB><FieldB /></EmbedB>`,
+	},
+
+	// Other kinds of nil anonymous fields
+	{
+		Value:     &PointerAnonFields{},
+		ExpectXML: `<PointerAnonFields />`,
+	},
+
+	// Test that name casing matters
+	{
+		Value:     &NameCasing{Xy: "mixed", XY: "upper", XyA: "mixedA", XYA: "upperA"},
+		ExpectXML: `<casing Xy="mixedA" XY="upperA"><Xy>mixed</Xy><XY>upper</XY></casing>`,
+	},
+
+	// Test the order in which the XML element name is chosen
+	{
+		Value: &NamePrecedence{
+			FromTag:     XMLNameWithoutTag{Value: "A"},
+			FromNameVal: XMLNameWithoutTag{XMLName: Name{Local: "InXMLName"}, Value: "B"},
+			FromNameTag: XMLNameWithTag{Value: "C"},
+			InFieldName: "D",
+		},
+		ExpectXML: `<Parent>` +
+			`<InTag>A</InTag>` +
+			`<InXMLName>B</InXMLName>` +
+			`<InXMLNameTag>C</InXMLNameTag>` +
+			`<InFieldName>D</InFieldName>` +
+			`</Parent>`,
+	},
+
+	// xml.Name works in a plain field as well.
+	{
+		Value:     &NameInField{Name{Space: "ns", Local: "foo"}},
+		ExpectXML: `<NameInField><foo xmlns="ns" /></NameInField>`,
+	},
+
+	// Marshaling zero xml.Name uses the tag or field name.
+	{
+		Value:     &NameInField{},
+		ExpectXML: `<NameInField><foo xmlns="ns" /></NameInField>`,
+	},
+
+	// Test attributes
+	{
+		Value: &AttrTest{
+			Int:   8,
+			Named: 9,
+			Float: 23.5,
+			Uint8: 255,
+			Bool:  true,
+			Str:   "str",
+			Bytes: []byte("byt"),
+		},
+		ExpectXML: `<AttrTest Int="8" int="9" Float="23.5" Uint8="255"` +
+			` Bool="true" Str="str" Bytes="byt" />`,
+	},
+	{
+		Value: &AttrTest{Bytes: []byte{}},
+		ExpectXML: `<AttrTest Int="0" int="0" Float="0" Uint8="0"` +
+			` Bool="false" Str="" Bytes="" />`,
+	},
+	{
+		Value: &AttrsTest{
+			Attrs: []Attr{
+				{Name: Name{Local: "Answer"}, Value: "42"},
+				{Name: Name{Local: "Int"}, Value: "8"},
+				{Name: Name{Local: "int"}, Value: "9"},
+				{Name: Name{Local: "Float"}, Value: "23.5"},
+				{Name: Name{Local: "Uint8"}, Value: "255"},
+				{Name: Name{Local: "Bool"}, Value: "true"},
+				{Name: Name{Local: "Str"}, Value: "str"},
+				{Name: Name{Local: "Bytes"}, Value: "byt"},
+			},
+		},
+		ExpectXML: `<AttrsTest Answer="42" Int="8" int="9" Float="23.5" Uint8="255" Bool="true" Str="str" Bytes="byt" Int="0" int="0" Float="0" Uint8="0" Bool="false" Str="" Bytes="" />`,
+	},
+	{
+		Value: &AttrsTest{
+			Attrs: []Attr{
+				{Name: Name{Local: "Answer"}, Value: "42"},
+			},
+			Int:   8,
+			Named: 9,
+			Float: 23.5,
+			Uint8: 255,
+			Bool:  true,
+			Str:   "str",
+			Bytes: []byte("byt"),
+		},
+		ExpectXML: `<AttrsTest Answer="42" Int="8" int="9" Float="23.5" Uint8="255" Bool="true" Str="str" Bytes="byt" />`,
+	},
+	{
+		Value: &AttrsTest{
+			Attrs: []Attr{
+				{Name: Name{Local: "Int"}, Value: "0"},
+				{Name: Name{Local: "int"}, Value: "0"},
+				{Name: Name{Local: "Float"}, Value: "0"},
+				{Name: Name{Local: "Uint8"}, Value: "0"},
+				{Name: Name{Local: "Bool"}, Value: "false"},
+				{Name: Name{Local: "Str"}},
+				{Name: Name{Local: "Bytes"}},
+			},
+			Bytes: []byte{},
+		},
+		ExpectXML: `<AttrsTest Int="0" int="0" Float="0" Uint8="0" Bool="false" Str="" Bytes="" Int="0" int="0" Float="0" Uint8="0" Bool="false" Str="" Bytes="" />`,
+	},
+	{
+		Value: &OmitAttrTest{
+			Int:   8,
+			Named: 9,
+			Float: 23.5,
+			Uint8: 255,
+			Bool:  true,
+			Str:   "str",
+			Bytes: []byte("byt"),
+			PStr:  &empty,
+		},
+		ExpectXML: `<OmitAttrTest Int="8" int="9" Float="23.5" Uint8="255"` +
+			` Bool="true" Str="str" Bytes="byt" PStr="" />`,
+	},
+	{
+		Value:     &OmitAttrTest{},
+		ExpectXML: `<OmitAttrTest />`,
+	},
+
+	// pointer fields
+	{
+		Value:     &PointerFieldsTest{Name: &nameAttr, Age: &ageAttr, Contents: &contentsAttr},
+		ExpectXML: `<dummy name="Sarah" age="12">lorem ipsum</dummy>`,
+	},
+
+	// empty chardata pointer field
+	{
+		Value:     &ChardataEmptyTest{},
+		ExpectXML: `<test />`,
+	},
+
+	// omitempty on fields
+	{
+		Value: &OmitFieldTest{
+			Int:   8,
+			Named: 9,
+			Float: 23.5,
+			Uint8: 255,
+			Bool:  true,
+			Str:   "str",
+			Bytes: []byte("byt"),
+			PStr:  &empty,
+			Ptr:   &PresenceTest{},
+		},
+		ExpectXML: `<OmitFieldTest>` +
+			`<Int>8</Int>` +
+			`<int>9</int>` +
+			`<Float>23.5</Float>` +
+			`<Uint8>255</Uint8>` +
+			`<Bool>true</Bool>` +
+			`<Str>str</Str>` +
+			`<Bytes>byt</Bytes>` +
+			`<PStr />` +
+			`<Ptr />` +
+			`</OmitFieldTest>`,
+	},
+	{
+		Value:     &OmitFieldTest{},
+		ExpectXML: `<OmitFieldTest />`,
+	},
+
+	// Test ",any"
+	{
+		ExpectXML: `<a><nested><value>known</value></nested><other><sub>unknown</sub></other></a>`,
+		Value: &AnyTest{
+			Nested: "known",
+			AnyField: AnyHolder{
+				XMLName: Name{Local: "other"},
+				XML:     "<sub>unknown</sub>",
+			},
+		},
+	},
+	{
+		Value: &AnyTest{Nested: "known",
+			AnyField: AnyHolder{
+				XML:     "<unknown/>",
+				XMLName: Name{Local: "AnyField"},
+			},
+		},
+		ExpectXML: `<a><nested><value>known</value></nested><AnyField><unknown/></AnyField></a>`,
+	},
+	{
+		ExpectXML: `<a><nested><value>b</value></nested></a>`,
+		Value: &AnyOmitTest{
+			Nested: "b",
+		},
+	},
+	{
+		ExpectXML: `<a><nested><value>b</value></nested><c><d>e</d></c><g xmlns="f"><h>i</h></g></a>`,
+		Value: &AnySliceTest{
+			Nested: "b",
+			AnyField: []AnyHolder{
+				{
+					XMLName: Name{Local: "c"},
+					XML:     "<d>e</d>",
+				},
+				{
+					XMLName: Name{Space: "f", Local: "g"},
+					XML:     "<h>i</h>",
+				},
+			},
+		},
+	},
+	{
+		ExpectXML: `<a><nested><value>b</value></nested></a>`,
+		Value: &AnySliceTest{
+			Nested: "b",
+		},
+	},
+
+	// Test recursive types.
+	{
+		Value: &RecurseA{
+			A: "a1",
+			B: &RecurseB{
+				A: &RecurseA{"a2", nil},
+				B: "b1",
+			},
+		},
+		ExpectXML: `<RecurseA><A>a1</A><B><A><A>a2</A></A><B>b1</B></B></RecurseA>`,
+	},
+
+	// Test ignoring fields via "-" tag
+	{
+		ExpectXML: `<IgnoreTest />`,
+		Value:     &IgnoreTest{},
+	},
+	{
+		ExpectXML: `<IgnoreTest />`,
+		Value:     &IgnoreTest{PublicSecret: "can't tell"},
+	},
+
+	// Test escaping.
+	{
+		ExpectXML: `<a><nested><value>dquote: &#34;; squote: &#39;; ampersand: &amp;; less: &lt;; greater: &gt;;</value></nested><empty /></a>`,
+		Value: &AnyTest{
+			Nested:   `dquote: "; squote: '; ampersand: &; less: <; greater: >;`,
+			AnyField: AnyHolder{XMLName: Name{Local: "empty"}},
+		},
+	},
+	{
+		ExpectXML: `<a><nested><value>newline: &#xA;; cr: &#xD;; tab: &#x9;;</value></nested><AnyField /></a>`,
+		Value: &AnyTest{
+			Nested:   "newline: \n; cr: \r; tab: \t;",
+			AnyField: AnyHolder{XMLName: Name{Local: "AnyField"}},
+		},
+	},
+	{
+		ExpectXML: `<EmbedInt><MyInt>42</MyInt></EmbedInt>`,
+		Value: &EmbedInt{
+			MyInt: 42,
+		},
+	},
+	// Test outputting CDATA-wrapped text.
+	{
+		ExpectXML: `<CDataTest />`,
+		Value:     &CDataTest{},
+	},
+	{
+		ExpectXML: `<CDataTest><![CDATA[http://example.com/tests/1?foo=1&bar=baz]]></CDataTest>`,
+		Value: &CDataTest{
+			Chardata: "http://example.com/tests/1?foo=1&bar=baz",
+		},
+	},
+	{
+		ExpectXML: `<CDataTest><![CDATA[Literal <![CDATA[Nested]]]]><![CDATA[>!]]></CDataTest>`,
+		Value: &CDataTest{
+			Chardata: "Literal <![CDATA[Nested]]>!",
+		},
+	},
+	{
+		ExpectXML: `<CDataTest><![CDATA[<![CDATA[Nested]]]]><![CDATA[> Literal!]]></CDataTest>`,
+		Value: &CDataTest{
+			Chardata: "<![CDATA[Nested]]> Literal!",
+		},
+	},
+	{
+		ExpectXML: `<CDataTest><![CDATA[<![CDATA[Nested]]]]><![CDATA[> Literal! <![CDATA[Nested]]]]><![CDATA[> Literal!]]></CDataTest>`,
+		Value: &CDataTest{
+			Chardata: "<![CDATA[Nested]]> Literal! <![CDATA[Nested]]> Literal!",
+		},
+	},
+	{
+		ExpectXML: `<CDataTest><![CDATA[<![CDATA[<![CDATA[Nested]]]]><![CDATA[>]]]]><![CDATA[>]]></CDataTest>`,
+		Value: &CDataTest{
+			Chardata: "<![CDATA[<![CDATA[Nested]]>]]>",
+		},
+	},
+
+	// Test omitempty with parent chain; see golang.org/issue/4168.
+	{
+		ExpectXML: `<Strings><A /></Strings>`,
+		Value:     &Strings{},
+	},
+	// Custom marshalers.
+	{
+		ExpectXML: `<MyMarshalerTest>hello world</MyMarshalerTest>`,
+		Value:     &MyMarshalerTest{},
+	},
+	{
+		ExpectXML: `<MarshalerStruct Foo="hello world" />`,
+		Value:     &MarshalerStruct{},
+	},
+	{
+		ExpectXML: `<outer xmlns="testns" int="10" />`,
+		Value:     &OuterStruct{IntAttr: 10},
+	},
+	{
+		ExpectXML: `<test xmlns="outerns" int="10" />`,
+		Value:     &OuterNamedStruct{XMLName: Name{Space: "outerns", Local: "test"}, IntAttr: 10},
+	},
+	{
+		ExpectXML: `<test xmlns="outerns" int="10" />`,
+		Value:     &OuterNamedOrderedStruct{XMLName: Name{Space: "outerns", Local: "test"}, IntAttr: 10},
+	},
+	{
+		ExpectXML: `<outer xmlns="testns" int="10" />`,
+		Value:     &OuterOuterStruct{OuterStruct{IntAttr: 10}},
+	},
+	{
+		ExpectXML: `<NestedAndChardata><A><B /><B /></A>test</NestedAndChardata>`,
+		Value:     &NestedAndChardata{AB: make([]string, 2), Chardata: "test"},
+	},
+	{
+		ExpectXML: `<NestedAndComment><A><B /><B /></A><!--test--></NestedAndComment>`,
+		Value:     &NestedAndComment{AB: make([]string, 2), Comment: "test"},
+	},
+	{
+		ExpectXML: `<NestedAndCData><A><B /><B /></A><![CDATA[test]]></NestedAndCData>`,
+		Value:     &NestedAndCData{AB: make([]string, 2), CDATA: "test"},
+	},
+	{
+		ExpectXML: `<IndirComment><T1 /><!--hi--><T2 /></IndirComment>`,
+		Value:     &IndirComment{Comment: stringptr("hi")},
+	},
+	{
+		ExpectXML: `<IndirComment><T1 /><T2 /></IndirComment>`,
+		Value:     &IndirComment{Comment: stringptr("")},
+	},
+	{
+		ExpectXML: `<IfaceComment><T1 /><!--hi--><T2 /></IfaceComment>`,
+		Value:     &IfaceComment{Comment: "hi"},
+	},
+	{
+		ExpectXML: `<DirectComment><T1 /><!--hi--><T2 /></DirectComment>`,
+		Value:     &DirectComment{Comment: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectComment><T1 /><T2 /></DirectComment>`,
+		Value:     &DirectComment{Comment: string("")},
+	},
+	{
+		ExpectXML: `<IndirChardata><T1 />hi<T2 /></IndirChardata>`,
+		Value:     &IndirChardata{Chardata: stringptr("hi")},
+	},
+	{
+		ExpectXML: `<IndirChardata><T1 /><T2 /></IndirChardata>`,
+		Value:     &IndirChardata{Chardata: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirChardata><T1 /><T2 /></IndirChardata>`,
+		Value:     &IndirChardata{Chardata: nil},
+	},
+	{
+		ExpectXML: `<DirectChardata><T1 />hi<T2 /></DirectChardata>`,
+		Value:     &DirectChardata{Chardata: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectChardata><T1 /><T2 /></DirectChardata>`,
+		Value:     &DirectChardata{Chardata: string("")},
+	},
+	{
+		ExpectXML: `<IndirCDATA><T1 /><![CDATA[hi]]><T2 /></IndirCDATA>`,
+		Value:     &IndirCDATA{CDATA: stringptr("hi")},
+	},
+	{
+		ExpectXML: `<IndirCDATA><T1 /><T2 /></IndirCDATA>`,
+		Value:     &IndirCDATA{CDATA: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirCDATA><T1 /><T2 /></IndirCDATA>`,
+		Value:     &IndirCDATA{CDATA: nil},
+	},
+
+	{
+		ExpectXML: `<DirectCDATA><T1 /><![CDATA[hi]]><T2 /></DirectCDATA>`,
+		Value:     &DirectCDATA{CDATA: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectCDATA><T1 /><T2 /></DirectCDATA>`,
+		Value:     &DirectCDATA{CDATA: string("")},
+	},
+	{
+		ExpectXML: `<IndirInnerXML><T1 /><hi/><T2 /></IndirInnerXML>`,
+		Value:     &IndirInnerXML{InnerXML: stringptr("<hi/>")},
+	},
+	{
+		ExpectXML: `<IndirInnerXML><T1 /><T2 /></IndirInnerXML>`,
+		Value:     &IndirInnerXML{InnerXML: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirInnerXML><T1 /><T2 /></IndirInnerXML>`,
+		Value:     &IndirInnerXML{InnerXML: nil},
+	},
+	{
+		ExpectXML: `<IfaceInnerXML><T1 /><hi/><T2 /></IfaceInnerXML>`,
+		Value:     &IfaceInnerXML{InnerXML: "<hi/>"},
+	},
+	{
+		ExpectXML: `<IfaceInnerXML><T1 /><T2 /></IfaceInnerXML>`,
+		Value:     &IfaceInnerXML{InnerXML: nil},
+	},
+	{
+		ExpectXML: `<DirectInnerXML><T1 /><hi/><T2 /></DirectInnerXML>`,
+		Value:     &DirectInnerXML{InnerXML: string("<hi/>")},
+	},
+	{
+		ExpectXML: `<DirectInnerXML><T1 /><T2 /></DirectInnerXML>`,
+		Value:     &DirectInnerXML{InnerXML: string("")},
+	},
+	{
+		ExpectXML: `<IndirElement><T1 /><Element>hi</Element><T2 /></IndirElement>`,
+		Value:     &IndirElement{Element: stringptr("hi")},
+	},
+	{
+		ExpectXML: `<IndirElement><T1 /><Element /><T2 /></IndirElement>`,
+		Value:     &IndirElement{Element: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirElement><T1 /><T2 /></IndirElement>`,
+		Value:     &IndirElement{Element: nil},
+	},
+	{
+		ExpectXML: `<IfaceElement><T1 /><Element>hi</Element><T2 /></IfaceElement>`,
+		Value:     &IfaceElement{Element: "hi"},
+	},
+	{
+		ExpectXML: `<IfaceElement><T1 /><T2 /></IfaceElement>`,
+		Value:     &IfaceElement{Element: nil},
+	},
+	{
+		ExpectXML: `<DirectElement><T1 /><Element>hi</Element><T2 /></DirectElement>`,
+		Value:     &DirectElement{Element: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectElement><T1 /><Element /><T2 /></DirectElement>`,
+		Value:     &DirectElement{Element: string("")},
+	},
+	{
+		ExpectXML: `<IndirOmitEmpty><T1 /><OmitEmpty>hi</OmitEmpty><T2 /></IndirOmitEmpty>`,
+		Value:     &IndirOmitEmpty{OmitEmpty: stringptr("hi")},
+	},
+	{
+		// Note: Changed in Go 1.8 to include <OmitEmpty> element (because x.OmitEmpty != nil).
+		ExpectXML: `<IndirOmitEmpty><T1 /><OmitEmpty /><T2 /></IndirOmitEmpty>`,
+		Value:     &IndirOmitEmpty{OmitEmpty: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirOmitEmpty><T1 /><T2 /></IndirOmitEmpty>`,
+		Value:     &IndirOmitEmpty{OmitEmpty: nil},
+	},
+	{
+		ExpectXML: `<IfaceOmitEmpty><T1 /><OmitEmpty>hi</OmitEmpty><T2 /></IfaceOmitEmpty>`,
+		Value:     &IfaceOmitEmpty{OmitEmpty: "hi"},
+	},
+	{
+		ExpectXML: `<IfaceOmitEmpty><T1 /><T2 /></IfaceOmitEmpty>`,
+		Value:     &IfaceOmitEmpty{OmitEmpty: nil},
+	},
+	{
+		ExpectXML: `<DirectOmitEmpty><T1 /><OmitEmpty>hi</OmitEmpty><T2 /></DirectOmitEmpty>`,
+		Value:     &DirectOmitEmpty{OmitEmpty: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectOmitEmpty><T1 /><T2 /></DirectOmitEmpty>`,
+		Value:     &DirectOmitEmpty{OmitEmpty: string("")},
+	},
+	{
+		ExpectXML: `<IndirAny><T1 /><Any>hi</Any><T2 /></IndirAny>`,
+		Value:     &IndirAny{Any: stringptr("hi")},
+	},
+	{
+		ExpectXML: `<IndirAny><T1 /><Any /><T2 /></IndirAny>`,
+		Value:     &IndirAny{Any: stringptr("")},
+	},
+	{
+		ExpectXML: `<IndirAny><T1 /><T2 /></IndirAny>`,
+		Value:     &IndirAny{Any: nil},
+	},
+	{
+		ExpectXML: `<IfaceAny><T1 /><Any>hi</Any><T2 /></IfaceAny>`,
+		Value:     &IfaceAny{Any: "hi"},
+	},
+	{
+		ExpectXML: `<IfaceAny><T1 /><T2 /></IfaceAny>`,
+		Value:     &IfaceAny{Any: nil},
+	},
+	{
+		ExpectXML: `<DirectAny><T1 /><Any>hi</Any><T2 /></DirectAny>`,
+		Value:     &DirectAny{Any: string("hi")},
+	},
+	{
+		ExpectXML: `<DirectAny><T1 /><Any /><T2 /></DirectAny>`,
+		Value:     &DirectAny{Any: string("")},
+	},
+}
+
+func TestShortForm(t *testing.T) {
+	for idx, test := range shortFormTests {
+		t.Log(idx)
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			data, err := MarshalIndentShortForm(test.Value, "", "")
+			if err != nil {
+				t.Errorf("MarshalIndentShortForm(%#v) failed err(%s)", test.Value, err)
+				return
+			}
+
+			if got, want := string(data), test.ExpectXML; got != want {
+				t.Errorf("MarshalIndentShortForm(%#v):\nHAVE:\n%s\nWANT:\n%s", test.Value, got, want)
+				return
+			}
+		})
+	}
+}
