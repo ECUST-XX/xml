@@ -2,6 +2,12 @@
 
 Added official package of golang xml with shortform (auto close) support.
 
+e.g.
+```xml
+<book></book> -> <book />
+<happiness type="joy"></happiness> -> <happiness type="joy" />
+```
+
 # How to get
 ```
 go get github.com/ECUST-XX/xml
